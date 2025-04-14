@@ -1,0 +1,3 @@
+*.pyc
+results*
+trained_models*

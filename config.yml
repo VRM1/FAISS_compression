@@ -1,0 +1,41 @@
+# FAISS Clustering Configuration
+
+# Data settings
+data:
+  use_synthetic: true                  # Whether to use synthetic data or load from file
+  n_vectors: 1000000                    # Number of vectors for synthetic data
+  n_dimensions: 90                     # Dimensions of vectors
+  data_path: null                      # Path to data file (npy, csv, or parquet)
+  normalize_vectors: true              # Normalize vectors to unit length
+
+# Clustering settings
+clustering:
+  n_clusters: 500                    # Number of clusters to create
+  use_pq: false                        # Whether to use Product Quantization
+  pq_m: 8                              # Number of sub-quantizers for PQ (if used)
+  pq_bits: 8                           # Bits per sub-quantizer (usually 8 for 256 centroids)
+  nprobe: 1                            # Number of clusters to search during query
+  verbose: true                        # Show detailed output
+  gpu: false                           # Use GPU if available
+
+# Training settings
+training:
+  n_iterations: 20                     # Training iterations for k-means
+  sample_size: 1000000                 # Max vectors to use for training (set to -1 to use all)
+  seed: 42                             # Random seed for reproducibility
+
+# Output settings
+output:
+  save_codebook: true                  # Save the codebook (centroids)
+  save_index: true                     # Save the entire index
+  save_assignments: true               # Save cluster assignments for input vectors
+  output_dir: "results/clustering"     # Directory to save results
+  codebook_file: "codebook.npy"        # Filename for codebook
+  index_file: "faiss_index"            # Filename for FAISS index
+  assignments_file: "assignments.npy"  # Filename for cluster assignments
+
+# Query settings
+query:
+  run_query_examples: true             # Run example queries after clustering
+  n_query_examples: 5                  # Number of example queries to run
+  k: 5                                 # Number of nearest neighbors to retrieve
