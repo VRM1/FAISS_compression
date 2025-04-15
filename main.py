@@ -14,44 +14,14 @@ import pandas as pd
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
+# Import from dataset module
+from dataset.parquet_loader import load_data_from_config
+
 
 def load_config(config_path):
     """Load configuration from YAML file."""
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
-
-
-def load_data(config):
-    """Load or generate vector data based on configuration."""
-    if config['data']['use_synthetic']:
-        print(f"Generating {config['data']['n_vectors']} synthetic vectors with {config['data']['n_dimensions']} dimensions...")
-        np.random.seed(config['training']['seed'])
-        vectors = np.random.random((config['data']['n_vectors'], config['data']['n_dimensions'])).astype('float32')
-    elif config['data']['data_path']:
-        file_path = config['data']['data_path']
-        print(f"Loading vectors from {file_path}")
-        
-        if file_path.endswith('.npy'):
-            vectors = np.load(file_path).astype('float32')
-        elif file_path.endswith('.csv'):
-            df = pd.read_csv(file_path)
-            vectors = df.values.astype('float32')
-        elif file_path.endswith('.parquet'):
-            df = pd.read_parquet(file_path)
-            vectors = df.values.astype('float32')
-        else:
-            raise ValueError(f"Unsupported file format: {file_path}")
-    else:
-        raise ValueError("Either use_synthetic must be true or data_path must be provided")
-    
-    # Normalize vectors if requested
-    if config['data']['normalize_vectors']:
-        print("Normalizing vectors...")
-        norms = np.linalg.norm(vectors, axis=1, keepdims=True)
-        vectors = vectors / norms
-    
-    print(f"Loaded {vectors.shape[0]} vectors with {vectors.shape[1]} dimensions")
-    return vectors.astype('float32')  # Ensure float32 format for FAISS
 
 
 def create_faiss_index(vectors, config):
@@ -65,9 +35,13 @@ def create_faiss_index(vectors, config):
     # Create appropriate quantizer and index based on configuration
     if config['clustering']['gpu'] and faiss.get_num_gpus() > 0:
         print("Using GPU for clustering...")
-        res = faiss.StandardGpuResources()
-        quantizer = faiss.IndexFlatL2(d)
-        quantizer = faiss.index_cpu_to_gpu(res, 0, quantizer)
+        try:
+            res = faiss.StandardGpuResources()
+            quantizer = faiss.IndexFlatL2(d)
+            quantizer = faiss.index_cpu_to_gpu(res, 0, quantizer)
+        except Exception as e:
+            print(f"GPU initialization failed: {e}. Falling back to CPU.")
+            quantizer = faiss.IndexFlatL2(d)
     else:
         quantizer = faiss.IndexFlatL2(d)
     
@@ -215,7 +189,7 @@ def extract_codebook(index, config, vectors=None):
                         try:
                             from sklearn.cluster import KMeans
                             # Get a sample of vectors for k-means
-                            if 'vectors' in globals():
+                            if vectors is not None:
                                 kmeans = KMeans(n_clusters=n_clusters, n_init=1, max_iter=20).fit(vectors[:min(len(vectors), 100000)])
                                 centroids = kmeans.cluster_centers_.astype('float32')
                             else:
@@ -250,7 +224,7 @@ def extract_codebook(index, config, vectors=None):
                     # Use the same alternative approach as above
                     try:
                         from sklearn.cluster import KMeans
-                        if 'vectors' in globals():
+                        if vectors is not None:
                             kmeans = KMeans(n_clusters=n_clusters, n_init=1, max_iter=20).fit(vectors[:min(len(vectors), 100000)])
                             centroids = kmeans.cluster_centers_.astype('float32')
                         else:
@@ -271,7 +245,7 @@ def get_vector_assignments(index, vectors, config):
     print("Computing cluster assignments for all vectors...")
     
     # For GPU indexes, we may need to handle the quantizer differently
-    if isinstance(index, faiss.GpuIndex):
+    if hasattr(faiss, 'GpuIndex') and isinstance(index, faiss.GpuIndex):
         # For GPU, we'll create a CPU version of the quantizer for assignment
         cpu_index = faiss.index_gpu_to_cpu(index)
         quantizer = cpu_index.quantizer
@@ -326,8 +300,8 @@ def get_vector_assignments(index, vectors, config):
     return assignments
 
 
-def save_results(index, codebook, assignments, config):
-    """Save the index, codebook, and assignments."""
+def save_results(index, codebook, assignments, vector_ids, config):
+    """Save the index, codebook, assignments, and vector IDs."""
     if not config['output']['output_dir']:
         print("No output directory specified, skipping save.")
         return
@@ -377,11 +351,21 @@ def save_results(index, codebook, assignments, config):
         assignments_path = os.path.join(output_dir, config['output']['assignments_file'])
         print(f"Saving cluster assignments to {assignments_path}")
         np.save(assignments_path, assignments)
+        
+        # Also save as CSV with IDs if available
+        if vector_ids is not None:
+            assignments_csv_path = os.path.join(output_dir, "assignments.csv")
+            assignments_df = pd.DataFrame({
+                'id': vector_ids,
+                'cluster': assignments
+            })
+            assignments_df.to_csv(assignments_csv_path, index=False)
+            print(f"Saved assignments with IDs to {assignments_csv_path}")
     
     print(f"All requested results saved to {output_dir}")
 
 
-def run_example_queries(index, vectors, codebook, config):
+def run_example_queries(index, vectors, codebook, vector_ids, config):
     """Run some example queries to demonstrate the index functionality."""
     if not config['query']['run_query_examples']:
         return
@@ -400,7 +384,10 @@ def run_example_queries(index, vectors, codebook, config):
     for i, idx in enumerate(query_indices):
         query = vectors[idx:idx+1]  # Keep 2D shape for FAISS
         
-        print(f"\nQuery {i+1} (vector index {idx}):")
+        if vector_ids is not None:
+            print(f"\nQuery {i+1} (vector ID: {vector_ids[idx]}):")
+        else:
+            print(f"\nQuery {i+1} (vector index {idx}):")
         
         # Find which cluster the query belongs to
         _, cluster_assignment = index.quantizer.search(query, 1)
@@ -414,7 +401,10 @@ def run_example_queries(index, vectors, codebook, config):
         
         print(f"  Top {k} nearest vectors:")
         for j, (distance, vector_idx) in enumerate(zip(distances[0], indices[0])):
-            print(f"    {j+1}. Vector {vector_idx} - Distance: {distance:.4f}")
+            if vector_ids is not None and vector_idx < len(vector_ids):
+                print(f"    {j+1}. Vector {vector_ids[vector_idx]} - Distance: {distance:.4f}")
+            else:
+                print(f"    {j+1}. Vector index {vector_idx} - Distance: {distance:.4f}")
 
 
 def main():
@@ -427,8 +417,8 @@ def main():
     # Load configuration
     config = load_config(args.config)
     
-    # Load or generate vector data
-    vectors = load_data(config)
+    # Load or generate vector data using the modular loader
+    vectors, vector_ids = load_data_from_config(config)
     
     # Create and train FAISS index
     index = create_faiss_index(vectors, config)
@@ -444,10 +434,10 @@ def main():
     add_vectors_to_index(index, vectors)
     
     # Save results
-    save_results(index, codebook, assignments, config)
+    save_results(index, codebook, assignments, vector_ids, config)
     
     # Run example queries
-    run_example_queries(index, vectors, codebook, config)
+    run_example_queries(index, vectors, codebook, vector_ids, config)
     
     print("\nClustering process completed!")
 
