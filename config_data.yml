@@ -2,9 +2,9 @@
 
 # Data generation settings
 data:
-  n_vectors: 1000000              # Number of vectors to generate
-  n_dimensions: 90                # Dimensions of each embedding vector
-  batch_size: 1000000              # Number of vectors per batch/file
+  n_vectors: 50000              # Number of vectors to generate
+  n_dimensions: 200                # Dimensions of each embedding vector
+  batch_size: 1000              # Number of vectors per batch/file
   normalize_vectors: true         # Whether to normalize vectors to unit length
   seed: 42                        # Random seed for reproducibility
 

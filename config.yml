@@ -12,10 +12,10 @@ data:
 
 # Clustering settings
 clustering:
-  n_clusters: 500                     # Number of clusters to create
+  n_clusters: 200                     # Number of clusters to create
   use_pq: false                       # Whether to use Product Quantization
-  pq_m: 8                             # Number of sub-quantizers for PQ (if used)
-  pq_bits: 8                          # Bits per sub-quantizer (usually 8 for 256 centroids)
+  pq_m: 8                             # Now this works! 200 ÷ 8 = 25
+  pq_bits: 10                          # Bits per sub-quantizer (usually 8 for 256 centroids)
   nprobe: 1                           # Number of clusters to search during query
   verbose: true                       # Show detailed output
   gpu: true                          # Use GPU if available
@@ -41,3 +41,12 @@ query:
   run_query_examples: true            # Run example queries after clustering
   n_query_examples: 5                 # Number of example queries to run
   k: 5                                # Number of nearest neighbors to retrieve
+
+# Test mode settings
+test_mode:
+  enabled: true                    # Set to true for error calculation mode
+  index_path: "results/clustering_PQ/faiss_index"     # Will auto-detect PQ or IVF
+  codebook_path: "results/clustering_PQ/codebook.npy" # Path to saved codebook
+  pq_codebooks_path: "results/clustering_PQ/pq_codebooks.npy" # Path to PQ codebooks
+  data_path: "data/synthetic"         # Path to original data for comparison
+  n_samples: 500                     # Number of samples for error calculation
