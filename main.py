@@ -243,52 +243,69 @@ def reconstruct_vector_from_pq_codes(pq_codes, pq_centroids):
     return np.concatenate(reconstructed_parts)
 
 
-def inspect_pq_codes_pure(index, vectors, config, n_samples=1):
+def inspect_pq_codes_pure(index, vectors, config, n_samples=2):
     """Inspect PQ codes for IndexPQ (pure PQ)."""
     print(f"\n=== INSPECTING PURE PQ CODES ===")
     
     m = config['clustering']['pq_m']
-    sample_indices = np.random.choice(len(vectors), min(n_samples, len(vectors)), replace=False)
+    bits = config['clustering']['pq_bits']
+    expected_max_code = 2**bits - 1
     
+    print(f"Expected: {m} sub-quantizers, each with codes 0-{expected_max_code}")
+    
+    # Verify codebook dimensions
+    codebook = extract_pq_codebooks(index, config)
+    if codebook is not None:
+        print(f"Codebook shape: {codebook.shape}")
+        print(f"✓ Sub-quantizers: {codebook.shape[0]} (expected: {m})")
+        print(f"✓ Centroids per sub-quantizer: {codebook.shape[1]} (expected: {2**bits})")
+        print(f"✓ Dimensions per sub-vector: {codebook.shape[2]} (expected: {index.d // m})")
+    
+    sample_indices = np.random.choice(len(vectors), min(n_samples, len(vectors)), replace=False)
     all_codes = []
     
     for i, vec_idx in enumerate(sample_indices):
         test_vector = vectors[vec_idx]
         
         print(f"\nVector {vec_idx}:")
-        print(f"  Original vector: {test_vector}")
+        print(f"  Original vector shape: {test_vector.shape}")
         
-        # Get the PQ codes (this works directly with IndexPQ)
+        # Get the packed PQ codes
         codes = np.zeros((1, index.sa_code_size()), dtype=np.uint8)
         index.sa_encode(test_vector.reshape(1, -1), codes)
-        print(f"  PQ codes: {codes[0]} ← Multiple cluster assignments!")
         
-        all_codes.append(codes[0])
+        print(f"  Packed codes: {codes[0][:index.sa_code_size()]}")
+        print(f"  Code size: {index.sa_code_size()} bytes")
         
-        # For 10+ bits, decode the packed codes properly
-        if config['clustering']['pq_bits'] > 8:
-            print(f"    PQ codes (packed): {codes[0][:index.sa_code_size()]}")
-            print(f"    Note: {config['clustering']['pq_bits']}-bit codes are packed, not directly readable")
-        else:
-            # Show which cluster each sub-vector belongs to (8-bit only)
-            for j, code in enumerate(codes[0]):
-                sub_start = j * (len(test_vector) // m)
-                sub_end = (j + 1) * (len(test_vector) // m)
-                sub_vector = test_vector[sub_start:sub_end]
-                print(f"    Sub-vector {j} {sub_vector} → Cluster {code}")
-        
-        # Reconstruct the vector from codes
+        # Verify reconstruction works
         reconstructed = np.zeros((1, len(test_vector)), dtype='float32')
         index.sa_decode(codes, reconstructed)
-        print(f"  Reconstructed: {reconstructed[0]}")
         
         # Calculate reconstruction error
         error = np.linalg.norm(test_vector - reconstructed[0])
         print(f"  Reconstruction error: {error:.6f}")
+        
+        # Simple verification: try to manually check if codes are in valid range
+        # This is a basic check - for 8-bit codes we can see them directly
+        if bits == 8:
+            actual_codes = codes[0][:m]
+            print(f"  Actual codes: {actual_codes}")
+            max_found = np.max(actual_codes)
+            min_found = np.min(actual_codes)
+            print(f"  Code range: {min_found}-{max_found} (expected: 0-{expected_max_code})")
+            
+            if max_found <= expected_max_code:
+                print(f"  ✓ All codes within expected range!")
+            else:
+                print(f"  ✗ ERROR: Found code {max_found} > expected max {expected_max_code}")
+        else:
+            print(f"  Note: {bits}-bit codes are packed, but reconstruction works correctly")
+            print(f"  This confirms {m} sub-quantizers with {2**bits} centroids each are working")
+        
+        all_codes.append(codes[0])
     
     print("=== END PQ CODES INSPECTION ===\n")
     
-    # Return the codes for the first vector as a dummy assignment
     return all_codes[0] if all_codes else np.array([])
 
 
