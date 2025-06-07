@@ -230,23 +230,30 @@ def load_data_from_config(config):
     Returns:
         tuple: (numpy.ndarray, list or None) - Array of embeddings and list of IDs if available
     """
+    # Get data config with defaults
+    data_config = config.get('data', {})
+    use_synthetic = data_config.get('use_synthetic', False)
+    data_path = data_config.get('data_path', None)
+    
     # Generate synthetic data if specified
-    if config['data']['use_synthetic']:
-        print(f"Generating {config['data']['n_vectors']} synthetic vectors with {config['data']['n_dimensions']} dimensions...")
-        np.random.seed(config['training']['seed'])
-        vectors = np.random.random((config['data']['n_vectors'], config['data']['n_dimensions'])).astype('float32')
-        ids = [f"synthetic_{i}" for i in range(config['data']['n_vectors'])]
+    if use_synthetic:
+        n_vectors = data_config.get('n_vectors', 1000)
+        n_dimensions = data_config.get('n_dimensions', 200)
+        seed = config.get('training', {}).get('seed', 42)
+        
+        print(f"Generating {n_vectors} synthetic vectors with {n_dimensions} dimensions...")
+        np.random.seed(seed)
+        vectors = np.random.random((n_vectors, n_dimensions)).astype('float32')
+        ids = [f"synthetic_{i}" for i in range(n_vectors)]
     
     # Load from file or directory
-    elif config['data']['data_path']:
-        data_path = config['data']['data_path']
-        
+    elif data_path:
         # Handle directory of parquet files
         if os.path.isdir(data_path):
             vectors, _, ids = load_embeddings_from_multiple_parquets(
                 data_path, 
                 config=config,
-                batch_size=config['data'].get('batch_size')
+                batch_size=data_config.get('batch_size', 50000)
             )
         
         # Handle single parquet file
@@ -265,7 +272,8 @@ def load_data_from_config(config):
         raise ValueError("Either use_synthetic must be true or data_path must be provided")
     
     # Normalize vectors if requested
-    if config['data']['normalize_vectors']:
+    normalize_vectors = data_config.get('normalize_vectors', False)
+    if normalize_vectors:
         print("Normalizing vectors...")
         norms = np.linalg.norm(vectors, axis=1, keepdims=True)
         non_zero_norm = norms > 0

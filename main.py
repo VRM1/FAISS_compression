@@ -316,8 +316,13 @@ def get_vector_assignments(index, vectors, config):
         print("IndexPQ doesn't use traditional cluster assignments.")
         print("Each vector gets multiple PQ codes (one per sub-vector).")
         
-        # For IndexPQ, show PQ codes instead
-        return inspect_pq_codes_pure(index, vectors, config)
+        # Get codes for all vectors, not just one sample
+        assignments = get_all_pq_assignments(index, vectors, config)
+        
+        # Still run inspection for verification
+        inspect_pq_codes_pure(index, vectors, config)
+    
+        return assignments
     else:
         # Original logic for IVF indexes
         print("Computing cluster assignments for all vectors...")
@@ -377,6 +382,36 @@ def get_vector_assignments(index, vectors, config):
         
         return assignments
 
+
+def get_all_pq_assignments(index, vectors, config):
+    """Get PQ codes for all vectors."""
+    print("Computing PQ codes for all vectors...")
+    
+    n_vectors = len(vectors)
+    code_size = index.sa_code_size()
+    
+    # Allocate array for all PQ codes
+    all_assignments = np.zeros((n_vectors, code_size), dtype=np.uint8)
+    
+    # Process in batches
+    batch_size = 10000
+    num_batches = (n_vectors + batch_size - 1) // batch_size
+    
+    with tqdm(total=n_vectors, desc="Computing PQ codes") as pbar:
+        for i in range(num_batches):
+            start_idx = i * batch_size
+            end_idx = min((i + 1) * batch_size, n_vectors)
+            batch = vectors[start_idx:end_idx]
+            
+            # Get PQ codes for this batch
+            batch_codes = np.zeros((batch.shape[0], code_size), dtype=np.uint8)
+            index.sa_encode(batch, batch_codes)
+            
+            all_assignments[start_idx:end_idx] = batch_codes
+            pbar.update(batch.shape[0])
+    
+    print(f"Generated PQ assignments shape: {all_assignments.shape}")
+    return all_assignments
 
 def save_results(index, codebook, assignments, vector_ids, config):
     """Save the index, codebook, assignments, and vector IDs."""
