@@ -19,7 +19,7 @@ import pandas as pd
 import faiss
 from tqdm import tqdm
 import pdb
-from dataset.parquet_loader import load_data_from_config
+from utils.parquet_loader import load_data_from_config
 
 
 def load_config(config_path):
@@ -142,6 +142,42 @@ def write_reconstructed_vectors_to_csv(vectors, output_path, config, method, bat
             print(f"Warning: Could not load true embeddings for error calculation: {e}")
             error_enabled = False
     
+    # Load original dataframe to get additional fields like mrch_id
+    original_df = None
+    include_mrch_id = False
+
+    try:
+        # Use the same data_path that contains the original embeddings with mrch_id
+        data_path = config.get('data', {}).get('data_path', '')
+        
+        if not data_path:
+            print("No data_path specified in config - skipping mrch_id inclusion")
+        elif os.path.exists(data_path):
+            # pd.read_parquet can handle both single files and directories
+            if data_path.endswith('.csv'):
+                original_df = pd.read_csv(data_path)
+            else:
+                # This works for both single .parquet files and directories with parquet files
+                original_df = pd.read_parquet(data_path)
+                
+            if original_df is not None:
+                print(f"Loaded original dataframe with {len(original_df)} rows")
+        else:
+            print(f"Data path does not exist: {data_path}")
+            
+        # Check if mrch_id column exists
+        if original_df is not None:
+            if 'mrch_id' in original_df.columns:
+                include_mrch_id = True
+                print("✓ Found 'mrch_id' column - will include in output CSV")
+            else:
+                print(f"Warning: 'mrch_id' column not found in original data.")
+                    
+    except Exception as e:
+        print(f"Warning: Could not load original dataframe for mrch_id: {e}")
+        original_df = None
+        include_mrch_id = False
+    
     # Create headers
     headers = create_embedding_headers(n_dimensions)
     
@@ -174,6 +210,24 @@ def write_reconstructed_vectors_to_csv(vectors, output_path, config, method, bat
             # Create DataFrame for this batch
             batch_data = {'row_id': batch_ids}
             
+            # Add mrch_id from original dataframe if available
+            if include_mrch_id and original_df is not None:
+                try:
+                    # Get mrch_id for corresponding rows (same indices as reconstructed vectors)
+                    batch_mrch_ids = []
+                    for idx in range(start_idx, end_idx):
+                        if idx < len(original_df):
+                            batch_mrch_ids.append(original_df.iloc[idx]['mrch_id'])
+                        else:
+                            batch_mrch_ids.append(None)  # Handle case where indices don't match
+                            print(f"Warning: Index {idx} exceeds original dataframe size ({len(original_df)})")
+                    
+                    batch_data['mrch_id'] = batch_mrch_ids
+                    
+                except Exception as e:
+                    print(f"Warning: Error adding mrch_id for batch {batch_idx}: {e}")
+                    # Continue without mrch_id for this batch
+            
             # Add embedding columns
             for i in range(n_dimensions):
                 batch_data[f'emb{i+1}'] = batch_vectors[:, i]
@@ -189,6 +243,10 @@ def write_reconstructed_vectors_to_csv(vectors, output_path, config, method, bat
             pbar.update(len(batch_vectors))
     
     print(f"Successfully wrote reconstructed vectors to {output_path}")
+    if include_mrch_id:
+        print("✓ Included 'mrch_id' column in output CSV")
+    else:
+        print("⚠ 'mrch_id' column not included - either not found or data not available")
     
     # Report error statistics if we collected any
     if all_errors:
@@ -270,6 +328,78 @@ def preview_csv(csv_path, n_rows=5):
     if embedding_cols:
         print(f"\nEmbedding statistics (sample):")
         print(df[embedding_cols].describe())
+
+
+
+def load_true_embeddings(config):
+    """Load true embeddings for error calculation."""
+    print("Loading true embeddings for error calculation...")
+    
+    # Create temporary config for loading data
+    temp_config = {
+        'data': config['data']
+    }
+    
+    vectors, vector_ids = load_data_from_config(temp_config)
+    print(f"Loaded {vectors.shape[0]} true vectors with {vectors.shape[1]} dimensions")
+    return vectors
+
+def calculate_batch_errors(reconstructed_batch, true_vectors, batch_start_idx, config):
+    """Calculate errors for a random sample from the current batch."""
+    error_config = config.get('error_calculation', {})
+    samples_per_batch = error_config.get('samples_per_batch', 100)
+    
+    batch_size = len(reconstructed_batch)
+    n_samples = min(samples_per_batch, batch_size)
+    
+    # Randomly sample indices from this batch
+    sample_indices = np.random.choice(batch_size, n_samples, replace=False)
+    
+    errors = []
+    for idx in sample_indices:
+        true_idx = batch_start_idx + idx
+        if true_idx < len(true_vectors):
+            reconstructed_vec = reconstructed_batch[idx]
+            true_vec = true_vectors[true_idx]
+            
+            # Calculate L2 error
+            error = np.linalg.norm(reconstructed_vec - true_vec)
+            errors.append(error)
+    
+    return errors
+
+def report_error_statistics(all_errors, method):
+    """Report final error statistics."""
+    if not all_errors:
+        print("No error samples collected.")
+        return None
+    
+    errors = np.array(all_errors)
+    
+    error_stats = {
+        'method': method,
+        'n_samples': len(errors),
+        'mean_error': float(np.mean(errors)),
+        'std_error': float(np.std(errors)),
+        'variance_error': float(np.var(errors)),
+        'min_error': float(np.min(errors)),
+        'max_error': float(np.max(errors)),
+        'median_error': float(np.median(errors)),
+        'percentile_95': float(np.percentile(errors, 95)),
+        'percentile_99': float(np.percentile(errors, 99))
+    }
+    
+    print(f"\n=== RECONSTRUCTION ERROR RESULTS ({method}) ===")
+    print(f"Samples processed: {error_stats['n_samples']}")
+    print(f"Mean error: {error_stats['mean_error']:.6f}")
+    print(f"Standard deviation: {error_stats['std_error']:.6f}")
+    print(f"Min error: {error_stats['min_error']:.6f}")
+    print(f"Max error: {error_stats['max_error']:.6f}")
+    print(f"Median error: {error_stats['median_error']:.6f}")
+    print(f"95th percentile: {error_stats['percentile_95']:.6f}")
+    print(f"99th percentile: {error_stats['percentile_99']:.6f}")
+    
+    return error_stats
 
 
 def main():
@@ -369,77 +499,6 @@ def main():
     print(f"🗜️  Reconstructed using {method} compression")
     if error_stats:
         print(f"📏 Reconstruction quality: Mean error = {error_stats['mean_error']:.6f}")
-
-
-def load_true_embeddings(config):
-    """Load true embeddings for error calculation."""
-    print("Loading true embeddings for error calculation...")
-    
-    # Create temporary config for loading data
-    temp_config = {
-        'data': config['data']
-    }
-    
-    vectors, vector_ids = load_data_from_config(temp_config)
-    print(f"Loaded {vectors.shape[0]} true vectors with {vectors.shape[1]} dimensions")
-    return vectors
-
-def calculate_batch_errors(reconstructed_batch, true_vectors, batch_start_idx, config):
-    """Calculate errors for a random sample from the current batch."""
-    error_config = config.get('error_calculation', {})
-    samples_per_batch = error_config.get('samples_per_batch', 100)
-    
-    batch_size = len(reconstructed_batch)
-    n_samples = min(samples_per_batch, batch_size)
-    
-    # Randomly sample indices from this batch
-    sample_indices = np.random.choice(batch_size, n_samples, replace=False)
-    
-    errors = []
-    for idx in sample_indices:
-        true_idx = batch_start_idx + idx
-        if true_idx < len(true_vectors):
-            reconstructed_vec = reconstructed_batch[idx]
-            true_vec = true_vectors[true_idx]
-            
-            # Calculate L2 error
-            error = np.linalg.norm(reconstructed_vec - true_vec)
-            errors.append(error)
-    
-    return errors
-
-def report_error_statistics(all_errors, method):
-    """Report final error statistics."""
-    if not all_errors:
-        print("No error samples collected.")
-        return None
-    
-    errors = np.array(all_errors)
-    
-    error_stats = {
-        'method': method,
-        'n_samples': len(errors),
-        'mean_error': float(np.mean(errors)),
-        'std_error': float(np.std(errors)),
-        'variance_error': float(np.var(errors)),
-        'min_error': float(np.min(errors)),
-        'max_error': float(np.max(errors)),
-        'median_error': float(np.median(errors)),
-        'percentile_95': float(np.percentile(errors, 95)),
-        'percentile_99': float(np.percentile(errors, 99))
-    }
-    
-    print(f"\n=== RECONSTRUCTION ERROR RESULTS ({method}) ===")
-    print(f"Samples processed: {error_stats['n_samples']}")
-    print(f"Mean error: {error_stats['mean_error']:.6f}")
-    print(f"Standard deviation: {error_stats['std_error']:.6f}")
-    print(f"Min error: {error_stats['min_error']:.6f}")
-    print(f"Max error: {error_stats['max_error']:.6f}")
-    print(f"Median error: {error_stats['median_error']:.6f}")
-    print(f"95th percentile: {error_stats['percentile_95']:.6f}")
-    print(f"99th percentile: {error_stats['percentile_99']:.6f}")
-    
-    return error_stats
 
 if __name__ == "__main__":
     main()

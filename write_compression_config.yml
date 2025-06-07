@@ -8,8 +8,8 @@ output:
   csv_path: "results/clustering_PQ/pq_quantized_embeddings.csv"        # Output CSV file path
   batch_size: 10000                                      # Batch size for writing CSV
   show_stats: true                                       # Show compression statistics
-  preview_csv: false                                      # Preview the output CSV file
-  preview_rows: 1                                        # Number of rows to preview
+  preview_csv: false                                  # Preview the output CSV file
+  preview_rows: 5                                       # Number of rows to preview
 
 # Error calculation settings
 error_calculation:

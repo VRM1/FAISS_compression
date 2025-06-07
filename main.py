@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 import json
 
 # Import from dataset module
-from dataset.parquet_loader import load_data_from_config
+from utils.parquet_loader import load_data_from_config
 
 
 def load_config(config_path):
