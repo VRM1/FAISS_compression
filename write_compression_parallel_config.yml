@@ -1,0 +1,33 @@
+# Paths to compression files
+paths:
+  codebook: "results/clustering_8bit_PQ/codebook.npy"        # Path to codebook file
+  assignments: "results/clustering_8bit_PQ/assignments.npy"  # Path to assignments file
+
+# Output settings
+output:
+  csv_path: "results/clustering_8bit_PQ/pq_quantized_embeddings.csv"        # Output CSV file path
+  batch_size: 10000                                      # Batch size for writing CSV (used in sequential mode)
+  show_stats: true                                       # Show compression statistics
+  preview_csv: false                                     # Preview the output CSV file
+  preview_rows: 5                                        # Number of rows to preview
+  
+  # New parallel processing options
+  parallel_writing: false                                 # Enable parallel CSV writing
+  n_processes: null                                      # Number of processes (null = auto-detect)
+  parallel_threshold: 1000                             # Minimum vectors to trigger parallel mode
+
+# Error calculation settings
+error_calculation:
+  enabled: false                                          # Enable/disable error calculation
+  samples_per_batch: 100                                 # Number of samples to check per batch/chunk
+  total_samples: 1000                                    # Maximum total samples across all batches
+
+# Data parameters (for loading true embeddings)
+data:
+  data_path: "data/synthetic"                            # Directory containing parquet files
+  embedding_columns: null                                # Set to null to auto-detect
+
+# Processing settings
+processing:
+  auto_detect_params: true                               # Auto-detect PQ parameters from codebook shape
+  method: null                                           # Compression method: "IVF", "PQ", or null for auto-detection
