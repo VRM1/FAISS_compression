@@ -503,8 +503,20 @@ def write_reconstructed_vectors_to_csv_optimized(vectors, output_path, config, m
     # Ensure output directory exists
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     
-    # Write to CSV
-    df.to_csv(output_path, index=False)
+    # Write to CSV in chunks with progress
+    chunk_size = 50000  # Adjust based on memory
+    total_chunks = len(df) // chunk_size + (1 if len(df) % chunk_size else 0)
+
+    with open(output_path, 'w', newline='') as f:
+        # Write header first
+        df.head(0).to_csv(f, index=False)
+        
+        # Write chunks with progress
+        with tqdm(total=total_chunks, desc=f"Writing {len(df):,} rows") as pbar:
+            for i in range(0, len(df), chunk_size):
+                chunk = df.iloc[i:i+chunk_size]
+                chunk.to_csv(f, header=False, index=False, mode='a')
+                pbar.update(1)
     
     print(f"Successfully wrote reconstructed vectors to {output_path}")
     if include_mrch_id:
